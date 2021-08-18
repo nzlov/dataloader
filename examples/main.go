@@ -1,59 +1,44 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"time"
 
 	"github.com/nzlov/dataloader"
 )
 
-func a() {
-	c := dataloader.LoaderConfig[string]{
-		Fetch: func(keys []string) ([]*string, []error) {
-			a := []*string{}
-			for i := range keys {
-				a = append(a, &keys[i])
-			}
-			return a, nil
-		},
-		Wait:      time.Millisecond,
-		CacheTime: time.Second,
-		MaxBatch:  100,
-	}
-	loader := dataloader.NewLoader(c)
-	r, err := loader.Load("abbb")
-	fmt.Println(*r, err)
-}
-
-var m = map[string]int{
-	"a": 1,
-	"b": 2,
-}
-
-func b() {
-	c := dataloader.LoaderConfig[int]{
-		Fetch: func(keys []string) ([]*int, []error) {
-			a := []*int{}
-			for _, v := range keys {
-				mv, ok := m[v]
-				if ok {
-					a = append(a, &mv)
-				} else {
-					a = append(a, nil)
-				}
-			}
-			return a, nil
-		},
-		Wait:      time.Millisecond,
-		CacheTime: time.Second,
-		MaxBatch:  100,
-	}
-	loader := dataloader.NewLoader(c)
-	r, err := loader.Load("a")
-	fmt.Println(*r, err)
-}
-
 func main() {
-	a()
-	b()
+	config := dataloader.NewConfig()
+	strLoader := dataloader.NewLoader[string](config, func(keys []string) ([]*string, []error) {
+		vs := []*string{}
+		for _, v := range keys {
+			vs = append(vs, &v)
+		}
+		return vs, nil
+	})
+
+	s, err := strLoader.Load("a")
+	fmt.Println(*s, err)
+
+	m := map[string]int{
+		"a": 1,
+		"b": 2,
+	}
+	intLoader := dataloader.NewLoader[int](config, func(keys []string) ([]*int, []error) {
+		vs := []*int{}
+		errs := []error{}
+		for _, v := range keys {
+			mv, ok := m[v]
+			if ok {
+				vs = append(vs, &mv)
+				errs = append(errs, nil)
+			} else {
+				vs = append(vs, nil)
+				errs = append(errs, errors.New("not found"))
+			}
+		}
+		return vs, errs
+	})
+	i, errs := intLoader.LoadAll([]string{"a", "c"})
+	fmt.Println(i, errs)
 }

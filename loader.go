@@ -5,11 +5,10 @@ import (
 	"time"
 )
 
-// LoaderConfig captures the config to create a new Loader
-type LoaderConfig[T any] struct {
-	// Fetch is a method that provides the data for the loader
-	Fetch func(keys []string) ([]*T, []error)
+type Fetch[T any] func(keys []string) ([]*T, []error)
 
+// LoaderConfig captures the config to create a new Loader
+type LoaderConfig struct {
 	// Wait is how long wait before sending a batch
 	Wait time.Duration
 
@@ -20,10 +19,19 @@ type LoaderConfig[T any] struct {
 	MaxBatch int
 }
 
+func NewConfig() LoaderConfig{
+    return LoaderConfig{
+        Wait:time.Millisecond,
+        CacheTime:time.Second,
+        MaxBatch:100,
+    }
+}
+
+
 // NewLoader creates a new Loader given a fetch, wait, and maxBatch
-func NewLoader[T any](config LoaderConfig[T]) *Loader[T] {
+func NewLoader[T any](config LoaderConfig,f Fetch[T]) *Loader[T] {
 	return &Loader[T]{
-		fetch:     config.Fetch,
+		fetch:     f,
 		wait:      config.Wait,
 		maxBatch:  config.MaxBatch,
 		cachetime: config.CacheTime,
@@ -39,7 +47,7 @@ type LoaderCacheItem[T any] struct {
 // Loader batches and caches requests
 type Loader[T any] struct {
 	// this method provides the data for the loader
-	fetch func(keys []string) ([]*T, []error)
+	fetch Fetch[T]
 
 	// how long to done before sending a batch
 	wait time.Duration
