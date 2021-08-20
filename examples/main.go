@@ -3,13 +3,40 @@ package main
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/nzlov/dataloader"
 )
 
+type Cache struct {
+	m map[string][]byte
+}
+
+func (c *Cache) SaveExpire(key string, t time.Duration, data []byte) {
+	c.m[key] = data
+}
+func (c *Cache) GetExpire(key string, t time.Duration) ([]byte, bool) {
+	data, ok := c.m[key]
+	return data, ok
+}
+func (c *Cache) Clear(keys ...string) {
+	for _, v := range keys {
+		delete(c.m, v)
+	}
+}
+
 func main() {
-	config := dataloader.NewConfig()
-	strLoader := dataloader.NewLoader[string](config, func(keys []string) ([]*string, []error) {
+	config := dataloader.Config{
+		Wait:      time.Second,
+		CacheTime: time.Minute,
+		MaxBatch:  100,
+		Prefix:    "a",
+	}
+	cache := &Cache{
+		m: map[string][]byte{},
+	}
+
+	strLoader := dataloader.NewLoader[string](config, cache, func(keys []string) ([]*string, []error) {
 		vs := []*string{}
 		for _, v := range keys {
 			vs = append(vs, &v)
@@ -24,7 +51,7 @@ func main() {
 		"a": 1,
 		"b": 2,
 	}
-	intLoader := dataloader.NewLoader[int](config, func(keys []string) ([]*int, []error) {
+	intLoader := dataloader.NewLoader[int](config, cache, func(keys []string) ([]*int, []error) {
 		vs := []*int{}
 		errs := []error{}
 		for _, v := range keys {

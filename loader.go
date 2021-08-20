@@ -1,14 +1,20 @@
 package dataloader
 
 import (
-	"sync"
+	"encoding/json"
 	"time"
 )
 
 type Fetch[T any] func(keys []string) ([]*T, []error)
 
+type Cache[T any] interface {
+	SaveExpire(string, time.Duration, []byte)
+	GetExpire(string, time.Duration) ([]byte, bool)
+	Clear(...string)
+}
+
 // LoaderConfig captures the config to create a new Loader
-type LoaderConfig struct {
+type Config struct {
 	// Wait is how long wait before sending a batch
 	Wait time.Duration
 
@@ -17,31 +23,21 @@ type LoaderConfig struct {
 
 	// MaxBatch will limit the maximum number of keys to send in one batch, 0 = not limit
 	MaxBatch int
-}
 
-func NewConfig() LoaderConfig{
-    return LoaderConfig{
-        Wait:time.Millisecond,
-        CacheTime:time.Second,
-        MaxBatch:100,
-    }
+	// Cache Key prefix
+	Prefix string
 }
-
 
 // NewLoader creates a new Loader given a fetch, wait, and maxBatch
-func NewLoader[T any](config LoaderConfig,f Fetch[T]) *Loader[T] {
+func NewLoader[T any](config Config, cache Cache[T], f Fetch[T]) *Loader[T] {
 	return &Loader[T]{
 		fetch:     f,
 		wait:      config.Wait,
 		maxBatch:  config.MaxBatch,
 		cachetime: config.CacheTime,
-		cache:     &sync.Map{},
+		cache:     cache,
+		prefix:    config.Prefix,
 	}
-}
-
-type LoaderCacheItem[T any] struct {
-	last time.Time
-	v    *T
 }
 
 // Loader batches and caches requests
@@ -55,20 +51,16 @@ type Loader[T any] struct {
 	// this will limit the maximum number of keys to send in one batch, 0 = no limit
 	maxBatch int
 
+	prefix string
 	// INTERNAL
 
-	// lazily created cache
-	//cache map[string]*LoaderCacheItem
-	cache *sync.Map
+	cache Cache[T]
 	// cache timeout
 	cachetime time.Duration
 
 	// the current batch. keys will continue to be collected until timeout is hit,
 	// then everything will be sent to the fetch method and out to the listeners
 	batch *LoaderBatch[T]
-
-	// mutex to prevent races
-	mu sync.Mutex
 }
 
 type LoaderBatch[T any] struct {
@@ -79,20 +71,32 @@ type LoaderBatch[T any] struct {
 	done    chan struct{}
 }
 
+func (l *Loader[T]) Key(key string) string {
+	return l.prefix + key
+}
+
 // Load a  by key, batching and caching will be applied automatically
 func (l *Loader[T]) Load(key string) (*T, error) {
 	return l.LoadThunk(key)()
+}
+
+func loaderWithBytes[T any](value []byte) *T {
+	if string(value) == "" {
+		return nil
+	}
+
+	o := new(T)
+	json.Unmarshal(value, o)
+	return o
 }
 
 // LoadThunk returns a function that when called will block waiting for a .
 // This method should be used if you want one goroutine to make requests to many
 // different data loaders without blocking until the thunk is called.
 func (l *Loader[T]) LoadThunk(key string) func() (*T, error) {
-	if it, ok := l.cache.Load(key); ok {
+	if it, ok := l.cache.GetExpire(l.Key(key), l.cachetime); ok {
 		return func() (*T, error) {
-			iv := it.(*LoaderCacheItem[T])
-			iv.last = time.Now()
-			return iv.v, nil
+			return loaderWithBytes[T](it), nil
 		}
 	}
 
@@ -161,42 +165,22 @@ func (l *Loader[T]) LoadAllThunk(keys []string) func() ([]*T, []error) {
 	}
 }
 
-// Prime the cache with the provided key and value. If the key already exists, no change is made
-// and false is returned.
-// (To forcefully prime the cache, clear the key first with loader.clear(key).prime(key, value).)
-func (l *Loader[T]) Prime(key string, value *T) bool {
-	var found bool
-	if _, found = l.cache.Load(key); !found {
-		// make a copy when writing to the cache, its easy to pass a pointer in from a loop var
-		// and end up with the whole cache pointing to the same value.
-		cpy := *value
-		l.unsafeSet(key, &cpy)
-	}
-	return !found
-}
-
 // Clear the value at key from the cache, if it exists
-func (l *Loader[T]) Clear(key string) {
-	l.cache.Delete(key)
+func (l *Loader[T]) Clear(keys ...string) {
+	nk := []string{}
+	for _, v := range keys {
+		nk = append(nk, l.Key(v))
+	}
+
+	l.cache.Clear(nk...)
 }
 
 func (l *Loader[T]) unsafeSet(key string, value *T) {
-	l.cache.Store(key, &LoaderCacheItem[T]{
-		last: time.Now(),
-		v:    value,
-	})
-}
-
-// CacheRotation Rotating cache time
-func (l *Loader[T]) CacheRotation(t time.Time) {
-	l.cache.Range(func(k, v interface{}) bool {
-		iv := v.(*LoaderCacheItem[T])
-		if t.Sub(iv.last) > l.cachetime {
-			l.cache.Delete(k)
-		}
-		iv.last = t
-		return true
-	})
+	data := []byte{}
+	if value != nil {
+		data, _ = json.Marshal(value)
+	}
+	l.cache.SaveExpire(l.Key(key), l.cachetime, data)
 }
 
 // keyIndex will return the location of the key in the batch, if its not found
