@@ -7,7 +7,7 @@ import (
 
 type Fetch[T any] func(keys []string) ([]*T, []error)
 
-type Cache[T any] interface {
+type Cache interface {
 	SaveExpire(string, time.Duration, []byte)
 	GetExpire(string, time.Duration) ([]byte, bool)
 	Clear(...string)
@@ -29,7 +29,7 @@ type Config struct {
 }
 
 // NewLoader creates a new Loader given a fetch, wait, and maxBatch
-func NewLoader[T any](config Config, cache Cache[T], f Fetch[T]) *Loader[T] {
+func NewLoader[T any](config Config, cache Cache, f Fetch[T]) *Loader[T] {
 	return &Loader[T]{
 		fetch:     f,
 		wait:      config.Wait,
@@ -54,7 +54,7 @@ type Loader[T any] struct {
 	prefix string
 	// INTERNAL
 
-	cache Cache[T]
+	cache Cache
 	// cache timeout
 	cachetime time.Duration
 

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/nzlov/dataloader"
@@ -23,6 +24,15 @@ func (c *Cache) Clear(keys ...string) {
 	for _, v := range keys {
 		delete(c.m, v)
 	}
+}
+
+type A struct {
+	a int
+
+	intLoader2 *dataloader.Loader[dataloader.Config]
+	intLoader3 *dataloader.Loader[os.File]
+	intLoader4 *dataloader.Loader[os.File]
+	intLoader  *dataloader.Loader[int]
 }
 
 func main() {
@@ -51,7 +61,8 @@ func main() {
 		"a": 1,
 		"b": 2,
 	}
-	intLoader := dataloader.NewLoader[int](config, cache, func(keys []string) ([]*int, []error) {
+	a := A{}
+	a.intLoader = dataloader.NewLoader[int](config, cache, func(keys []string) ([]*int, []error) {
 		vs := []*int{}
 		errs := []error{}
 		for _, v := range keys {
@@ -66,6 +77,6 @@ func main() {
 		}
 		return vs, errs
 	})
-	i, errs := intLoader.LoadAll([]string{"a", "c"})
+	i, errs := a.intLoader.LoadAll([]string{"a", "c"})
 	fmt.Println(i, errs)
 }
