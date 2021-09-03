@@ -28,6 +28,32 @@ type Config struct {
 	Prefix string
 }
 
+func (c Config) NewWait(w time.Duration) Config {
+	d := c
+	d.Wait = w
+	return d
+}
+func (c Config) NewCacheTime(t time.Duration) Config {
+	d := c
+	d.CacheTime = t
+	return d
+}
+func (c Config) NewMaxBatch(m int) Config {
+	d := c
+	d.MaxBatch = m
+	return d
+}
+func (c Config) NewPrefix(p string) Config {
+	d := c
+	d.Prefix = p
+	return d
+}
+func (c Config) WithPrefix(p string) Config {
+	d := c
+	d.Prefix += p
+	return d
+}
+
 // NewLoader creates a new Loader given a fetch, wait, and maxBatch
 func NewLoader[T any](config Config, cache Cache, f Fetch[T]) *Loader[T] {
 	return &Loader[T]{

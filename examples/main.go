@@ -46,7 +46,7 @@ func main() {
 		m: map[string][]byte{},
 	}
 
-	strLoader := dataloader.NewLoader[string](config, cache, func(keys []string) ([]*string, []error) {
+	strLoader := dataloader.NewLoader[string](config.NewPrefix("string:"), cache, func(keys []string) ([]*string, []error) {
 		vs := []*string{}
 		for _, v := range keys {
 			vs = append(vs, &v)
@@ -62,7 +62,7 @@ func main() {
 		"b": 2,
 	}
 	a := A{}
-	a.intLoader = dataloader.NewLoader[int](config, cache, func(keys []string) ([]*int, []error) {
+	a.intLoader = dataloader.NewLoader[int](config.WithPrefix("int:"), cache, func(keys []string) ([]*int, []error) {
 		vs := []*int{}
 		errs := []error{}
 		for _, v := range keys {
@@ -79,4 +79,5 @@ func main() {
 	})
 	i, errs := a.intLoader.LoadAll([]string{"a", "c"})
 	fmt.Println(i, errs)
+	fmt.Println(cache.m)
 }
