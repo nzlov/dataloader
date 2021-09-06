@@ -2,6 +2,7 @@ package dataloader
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 )
 
@@ -95,6 +96,7 @@ type LoaderBatch[T any] struct {
 	error   []error
 	closing bool
 	done    chan struct{}
+	one     *sync.Once
 }
 
 func (l *Loader[T]) Key(key string) string {
@@ -127,7 +129,10 @@ func (l *Loader[T]) LoadThunk(key string) func() (*T, error) {
 	}
 
 	if l.batch == nil {
-		l.batch = &LoaderBatch[T]{done: make(chan struct{})}
+		l.batch = &LoaderBatch[T]{
+			done: make(chan struct{}),
+			one:  &sync.Once{},
+		}
 	}
 	batch := l.batch
 	pos := batch.keyIndex(l, key)
@@ -226,8 +231,8 @@ func (b *LoaderBatch[T]) keyIndex(l *Loader[T], key string) int {
 
 	if l.maxBatch != 0 && pos >= l.maxBatch-1 {
 		if !b.closing {
-			b.closing = true
 			l.batch = nil
+			b.closing = true
 			go b.end(l)
 		}
 	}
@@ -239,16 +244,17 @@ func (b *LoaderBatch[T]) startTimer(l *Loader[T]) {
 	time.Sleep(l.wait)
 
 	// we must have hit a batch limit and are already finalizing this batch
-	if b.closing {
-		return
+	if !b.closing {
+		l.batch = nil
+		b.closing = true
+		b.end(l)
 	}
 
-	l.batch = nil
-
-	b.end(l)
 }
 
 func (b *LoaderBatch[T]) end(l *Loader[T]) {
-	b.data, b.error = l.fetch(b.keys)
-	close(b.done)
+	b.one.Do(func() {
+		b.data, b.error = l.fetch(b.keys)
+		close(b.done)
+	})
 }
