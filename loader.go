@@ -2,11 +2,12 @@ package dataloader
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
 
-type Fetch[T any] func(keys []string) ([]*T, []error)
+type Fetch[K comparable, R any] func(keys []K) ([]*R, []error)
 
 type Cache interface {
 	SaveExpire(string, time.Duration, []byte)
@@ -56,8 +57,8 @@ func (c Config) WithPrefix(p string) Config {
 }
 
 // NewLoader creates a new Loader given a fetch, wait, and maxBatch
-func NewLoader[T any](config Config, cache Cache, f Fetch[T]) *Loader[T] {
-	return &Loader[T]{
+func NewLoader[K comparable, R any](config Config, cache Cache, f Fetch[K, R]) *Loader[K, R] {
+	return &Loader[K, R]{
 		fetch:     f,
 		wait:      config.Wait,
 		maxBatch:  config.MaxBatch,
@@ -68,9 +69,9 @@ func NewLoader[T any](config Config, cache Cache, f Fetch[T]) *Loader[T] {
 }
 
 // Loader batches and caches requests
-type Loader[T any] struct {
+type Loader[K comparable, R any] struct {
 	// this method provides the data for the loader
-	fetch Fetch[T]
+	fetch Fetch[K, R]
 
 	// how long to done before sending a batch
 	wait time.Duration
@@ -87,24 +88,24 @@ type Loader[T any] struct {
 
 	// the current batch. keys will continue to be collected until timeout is hit,
 	// then everything will be sent to the fetch method and out to the listeners
-	batch *LoaderBatch[T]
+	batch *LoaderBatch[K, R]
 }
 
-type LoaderBatch[T any] struct {
-	keys    []string
-	data    []*T
+type LoaderBatch[K comparable, R any] struct {
+	keys    []K
+	data    []*R
 	error   []error
 	closing bool
 	done    chan struct{}
 	one     *sync.Once
 }
 
-func (l *Loader[T]) Key(key string) string {
-	return l.prefix + key
+func (l *Loader[K, R]) Key(key K) string {
+	return fmt.Sprintf("%v%v", l.prefix, key)
 }
 
 // Load a  by key, batching and caching will be applied automatically
-func (l *Loader[T]) Load(key string) (*T, error) {
+func (l *Loader[K, R]) Load(key K) (*R, error) {
 	return l.LoadThunk(key)()
 }
 
@@ -121,15 +122,15 @@ func loaderWithBytes[T any](value []byte) *T {
 // LoadThunk returns a function that when called will block waiting for a .
 // This method should be used if you want one goroutine to make requests to many
 // different data loaders without blocking until the thunk is called.
-func (l *Loader[T]) LoadThunk(key string) func() (*T, error) {
+func (l *Loader[K, R]) LoadThunk(key K) func() (*R, error) {
 	if it, ok := l.cache.GetExpire(l.Key(key), l.cachetime); ok {
-		return func() (*T, error) {
-			return loaderWithBytes[T](it), nil
+		return func() (*R, error) {
+			return loaderWithBytes[R](it), nil
 		}
 	}
 
 	if l.batch == nil {
-		l.batch = &LoaderBatch[T]{
+		l.batch = &LoaderBatch[K, R]{
 			done: make(chan struct{}),
 			one:  &sync.Once{},
 		}
@@ -137,10 +138,10 @@ func (l *Loader[T]) LoadThunk(key string) func() (*T, error) {
 	batch := l.batch
 	pos := batch.keyIndex(l, key)
 
-	return func() (*T, error) {
+	return func() (*R, error) {
 		<-batch.done
 
-		var data *T
+		var data *R
 		if pos < len(batch.data) {
 			data = batch.data[pos]
 		}
@@ -163,14 +164,14 @@ func (l *Loader[T]) LoadThunk(key string) func() (*T, error) {
 
 // LoadAll fetches many keys at once. It will be broken into appropriate sized
 // sub batches depending on how the loader is configured
-func (l *Loader[T]) LoadAll(keys []string) ([]*T, []error) {
-	results := make([]func() (*T, error), len(keys))
+func (l *Loader[K, R]) LoadAll(keys []K) ([]*R, []error) {
+	results := make([]func() (*R, error), len(keys))
 
 	for i, key := range keys {
 		results[i] = l.LoadThunk(key)
 	}
 
-	s := make([]*T, len(keys))
+	s := make([]*R, len(keys))
 	errors := make([]error, len(keys))
 	for i, thunk := range results {
 		s[i], errors[i] = thunk()
@@ -181,13 +182,13 @@ func (l *Loader[T]) LoadAll(keys []string) ([]*T, []error) {
 // LoadAllThunk returns a function that when called will block waiting for a s.
 // This method should be used if you want one goroutine to make requests to many
 // different data loaders without blocking until the thunk is called.
-func (l *Loader[T]) LoadAllThunk(keys []string) func() ([]*T, []error) {
-	results := make([]func() (*T, error), len(keys))
+func (l *Loader[K, R]) LoadAllThunk(keys []K) func() ([]*R, []error) {
+	results := make([]func() (*R, error), len(keys))
 	for i, key := range keys {
 		results[i] = l.LoadThunk(key)
 	}
-	return func() ([]*T, []error) {
-		s := make([]*T, len(keys))
+	return func() ([]*R, []error) {
+		s := make([]*R, len(keys))
 		errors := make([]error, len(keys))
 		for i, thunk := range results {
 			s[i], errors[i] = thunk()
@@ -197,7 +198,7 @@ func (l *Loader[T]) LoadAllThunk(keys []string) func() ([]*T, []error) {
 }
 
 // Clear the value at key from the cache, if it exists
-func (l *Loader[T]) Clear(keys ...string) {
+func (l *Loader[K, R]) Clear(keys ...K) {
 	nk := []string{}
 	for _, v := range keys {
 		nk = append(nk, l.Key(v))
@@ -206,7 +207,7 @@ func (l *Loader[T]) Clear(keys ...string) {
 	l.cache.Clear(nk...)
 }
 
-func (l *Loader[T]) unsafeSet(key string, value *T) {
+func (l *Loader[K, R]) unsafeSet(key K, value *R) {
 	data := []byte{}
 	if value != nil {
 		data, _ = json.Marshal(value)
@@ -216,7 +217,7 @@ func (l *Loader[T]) unsafeSet(key string, value *T) {
 
 // keyIndex will return the location of the key in the batch, if its not found
 // it will add the key to the batch
-func (b *LoaderBatch[T]) keyIndex(l *Loader[T], key string) int {
+func (b *LoaderBatch[K, R]) keyIndex(l *Loader[K, R], key K) int {
 	for i, existingKey := range b.keys {
 		if key == existingKey {
 			return i
@@ -240,7 +241,7 @@ func (b *LoaderBatch[T]) keyIndex(l *Loader[T], key string) int {
 	return pos
 }
 
-func (b *LoaderBatch[T]) startTimer(l *Loader[T]) {
+func (b *LoaderBatch[K, R]) startTimer(l *Loader[K, R]) {
 	time.Sleep(l.wait)
 
 	// we must have hit a batch limit and are already finalizing this batch
@@ -252,7 +253,7 @@ func (b *LoaderBatch[T]) startTimer(l *Loader[T]) {
 
 }
 
-func (b *LoaderBatch[T]) end(l *Loader[T]) {
+func (b *LoaderBatch[K, R]) end(l *Loader[K, R]) {
 	b.one.Do(func() {
 		b.data, b.error = l.fetch(b.keys)
 		close(b.done)

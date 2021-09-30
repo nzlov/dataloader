@@ -29,10 +29,10 @@ func (c *Cache) Clear(keys ...string) {
 type A struct {
 	a int
 
-	intLoader2 *dataloader.Loader[dataloader.Config]
-	intLoader3 *dataloader.Loader[os.File]
-	intLoader4 *dataloader.Loader[os.File]
-	intLoader  *dataloader.Loader[int]
+	intLoader2 *dataloader.Loader[string, dataloader.Config]
+	intLoader3 *dataloader.Loader[string, os.File]
+	intLoader4 *dataloader.Loader[string, os.File]
+	intLoader  *dataloader.Loader[string, int]
 }
 
 func main() {
@@ -62,7 +62,8 @@ func main() {
 		"b": 2,
 	}
 	a := A{}
-	a.intLoader = dataloader.NewLoader[int](config.WithPrefix("int:"), cache, func(keys []string) ([]*int, []error) {
+	a.intLoader = dataloader.NewLoader[string, int](config.WithPrefix("int:"), cache, func(keys []string) ([]*int, []error) {
+		fmt.Println(keys)
 		vs := []*int{}
 		errs := []error{}
 		for _, v := range keys {
@@ -78,6 +79,8 @@ func main() {
 		return vs, errs
 	})
 	i, errs := a.intLoader.LoadAll([]string{"a", "c"})
+	fmt.Println(i, errs)
+	i, errs = a.intLoader.LoadAll([]string{"a", "c"})
 	fmt.Println(i, errs)
 	fmt.Println(cache.m)
 }
