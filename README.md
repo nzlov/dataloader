@@ -8,8 +8,6 @@ The intended use is in graphql servers, to reduce the number of queries being se
 
 ## example
 
-run with `GOEXPERIMENT=unified` and `-gcflags=-G=3`.
-
 ```
-GOEXPERIMENT=unified go run -gcflags=-G=3 ./main.go
+go run ./examples/main.go
 ```
